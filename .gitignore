@@ -1,0 +1,12 @@
+debian
+*.geany
+.idea
+*.log
+PKGBUILD*
+pkg
+.ropeproject
+src
+tlp.install
+worktree*
+.zed
+*.zst

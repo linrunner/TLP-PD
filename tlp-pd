@@ -191,7 +191,7 @@ class PowerProfiles:
 
     @property
     def Profiles(self):
-        profiles = ['power-saver', 'performance']
+        profiles = ['power-saver', 'balanced', 'performance']
         return [{
             'Profile': GLib.Variant.new_string(profile),
             'Driver': GLib.Variant.new_string('tlp'),

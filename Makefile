@@ -78,18 +78,6 @@ SED = sed \
 INFILES = \
 	tlp-pd.service \
 
-MANFILES1 = \
-
-MANFILES8 = \
-
-MANFILESRDW8 = \
-
-SHFILES = \
-
-UTSHFILES = \
-
-PLFILES = \
-
 # Make targets
 all: $(INFILES)
 
@@ -99,7 +87,7 @@ $(INFILES): %: %.in
 clean:
 	rm -f $(INFILES)
 
-install-tlp: all
+install-pd: all
 	install -D -m 755 tlp-pd $(_SBIN)/tlp-pd
 	install -D -m 644 tlp-pd.service $(_SYSD)/tlp-pd.service
 	install -D -m 644 tlp-pd.policy $(_POLKIT)/tlp-pd.policy
@@ -109,18 +97,9 @@ install-tlp: all
 		install -D -m 644 tlp-pd.dbus.service $(_DBSVC)/$(BUS_NAME).service; \
 		sed -e 's|@BUS_NAME@|$(BUS_NAME)|g' -i $(_DBSVC)/$(BUS_NAME).service;)
 
-install-man-tlp:
-	# manpages
-	install -d -m 755 $(_MAN)/man1
-	cd man && install -m 644 $(MANFILES1) $(_MAN)/man1/
-	install -d -m 755 $(_MAN)/man8
-	cd man && install -m 644 $(MANFILES8) $(_MAN)/man8/
+install: install-pd
 
-install: install-tlp
-
-install-man: install-man-tlp
-
-uninstall-tlp:
+uninstall-pd:
 	rm -f $(_SBIN)/tlp-pd
 	rm -f $(_POLKIT)/tlp-pd.policy
 	rm -f $(_DBCONF)/org.freedesktop.UPower.PowerProfiles.conf
@@ -128,11 +107,4 @@ uninstall-tlp:
 	rm -f $(_DBCONF)/net.hadess.PowerProfiles.conf
 	rm -f $(_DBSVC)/net.hadess.PowerProfiles.service
 
-uninstall-man-tlp:
-	# manpages
-	cd $(_MAN)/man1 && rm -f $(MANFILES1)
-	cd $(_MAN)/man8 && rm -f $(MANFILES8)
-
-uninstall: uninstall-tlp
-
-uninstall-man: uninstall-man-tlp
+uninstall: uninstall-pd
