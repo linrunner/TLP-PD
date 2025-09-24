@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+# TLP Profiles Daemon (TLP-PD)
+# Implements the org.freedesktop.UPower.PowerProfile D-BUS interface
+# invented by power-profiles-daemon
+#
+# Copyright (c) 2025 Thomas Koch <linrunner at gmx.net> and others.
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+import dbus
+import dbus.service
+import dbus.mainloop.glib
+from gi.repository import GLib
+import subprocess
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- Constants
+DAEMON_NAME = "TLP Profiles Daemon"
+AVAILABLE_PROFILES = ["performance", "balanced", "power-saver"]
+
+# --- D-Bus constants
+BUS_NAME = "org.freedesktop.UPower.PowerProfiles"
+INTERFACE_NAME = BUS_NAME
+OBJECT_PATH = "/org/freedesktop/UPower/PowerProfiles"
+BUS_NAME_LEGACY = "net.hadess.PowerProfiles"
+INTERFACE_NAME_LEGACY = BUS_NAME_LEGACY
+OBJECT_PATH_LEGACY = "/net/hadess/PowerProfiles"
+
+# --- TLP constants
+TLP_LAST_PROFILE = "@TLP_RUN@/last_pwr"
+TLP_PROFILE_IDX = ["0", "1", "2"]
+
+
+# --- D-Bus service implementing the power-profiles-daemon API
+class ProfilesDaemon(dbus.service.Object):
+    def __init__(self, bus):
+        dbus.service.Object.__init__(self, bus, OBJECT_PATH)
+        # Export on the legacy interface net.hadess.PowerProfiles and legacy path too
+        self.SUPPORTS_MULTIPLE_OBJECT_PATHS = True
+        dbus.service.Object.add_to_connection(self, bus, OBJECT_PATH_LEGACY)
+
+        # Internal state
+        self._active_profile = "balanced"
+        self._profiles = []
+        for profile in AVAILABLE_PROFILES:
+            self._profiles.append({"Profile": f"{profile}", "Driver": "tlp"})
+        self._performance_degraded = ""
+        self._actions = []
+        self._version = "@TLPVER@"
+        self._cookie_counter = 0
+        self._holds = {}  # cookie -> {profile, reason, application_id, sender}
+
+        logger.info(f"{DAEMON_NAME} initialized")
+
+    # --- Methods
+    # Exported on both interfaces org.freedesktop.UPower.PowerProfiles and net.hadess.PowerProfiles (legacy)
+
+    @dbus.service.method(
+        dbus_interface=INTERFACE_NAME,
+        in_signature="sss",
+        out_signature="u",
+        sender_keyword="sender",
+    )
+    @dbus.service.method(
+        dbus_interface=INTERFACE_NAME_LEGACY,
+        in_signature="sss",
+        out_signature="u",
+        sender_keyword="sender",
+    )
+    def HoldProfile(self, profile, reason, application_id, sender=None):
+        # Hold a profile until released
+        ### Q: do we need this resp. which client is actually using it?
+        ### TODO: extend to AVAILABLE_PROFILES?
+        if profile not in ["power-saver", "performance"]:
+            raise dbus.exceptions.DBusException(
+                f"Invalid profile: {profile}",
+                name="org.freedesktop.DBus.Error.InvalidArgs",
+            )
+
+        self._cookie_counter += 1
+        cookie = self._cookie_counter
+
+        self._holds[cookie] = {
+            "profile": profile,
+            "reason": reason,
+            "application_id": application_id,
+            "sender": sender,
+        }
+
+        logger.info(
+            f"Profile hold created: {application_id} holds {profile} (cookie: {cookie})"
+        )
+
+        # Update active profile based on holds
+        self._update_profile_from_holds()
+
+        return dbus.UInt32(cookie)
+
+    @dbus.service.method(
+        dbus_interface=INTERFACE_NAME, in_signature="u", out_signature=""
+    )
+    @dbus.service.method(
+        dbus_interface=INTERFACE_NAME_LEGACY, in_signature="u", out_signature=""
+    )
+    def ReleaseProfile(self, cookie):
+        # Release a profile hold
+        ### Q: do we need this resp. which client is actually using it?
+        cookie = int(cookie)
+        if cookie not in self._holds:
+            raise dbus.exceptions.DBusException(
+                f"Invalid cookie: {cookie}",
+                name="org.freedesktop.DBus.Error.InvalidArgs",
+            )
+
+        hold_info = self._holds.pop(cookie)
+        logger.info(
+            f"Profile hold released: {hold_info['application_id']} (cookie: {cookie})"
+        )
+
+        # Update active profile based on remaining holds
+        self._update_profile_from_holds()
+
+    # --- Signals
+
+    @dbus.service.signal(dbus_interface=INTERFACE_NAME, signature="u")
+    # Exported on the interface org.freedesktop.UPower.PowerProfiles
+    # Emitted when a profile hold is released due to manual profile change
+    def ProfileReleased(self, cookie):
+        pass
+
+    @dbus.service.signal(dbus_interface=dbus.PROPERTIES_IFACE, signature="sa{sv}as")
+    # Exported on the interface org.freedesktop.DBus.Properties
+    # Emitted when the active profile changes
+    def PropertiesChanged(
+        self, interface_name, changed_properties, invalidated_properties
+    ):
+        pass
+
+    # --- Property-related Methods
+    # Exported on the interface org.freedesktop.DBus.Properties
+
+    @dbus.service.method(
+        dbus_interface=dbus.PROPERTIES_IFACE, in_signature="ss", out_signature="v"
+    )
+    def Get(self, interface_name, property_name):
+        # Get a property value
+        if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
+            raise dbus.exceptions.DBusException(
+                f"Unknown interface: {interface_name}",
+                name="org.freedesktop.DBus.Error.UnknownInterface",
+            )
+
+        return self._get_property(property_name)
+
+    @dbus.service.method(
+        dbus_interface=dbus.PROPERTIES_IFACE, in_signature="s", out_signature="a{sv}"
+    )
+    def GetAll(self, interface_name):
+        # Get all properties
+        if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
+            raise dbus.exceptions.DBusException(
+                f"Unknown interface: {interface_name}",
+                name="org.freedesktop.DBus.Error.UnknownInterface",
+            )
+
+        return {
+            "ActiveProfile": self._sync_active_profile_with_tlp(),
+            "PerformanceInhibited": "",  # Deprecated
+            "PerformanceDegraded": self._performance_degraded,
+            "Profiles": dbus.Array(self._profiles, signature="a{sv}"),
+            "Actions": dbus.Array(self._actions, signature="s"),
+            "ActiveProfileHolds": self._get_active_profile_holds(),
+            "Version": self._version,
+        }
+
+    @dbus.service.method(
+        dbus_interface=dbus.PROPERTIES_IFACE, in_signature="ssv", out_signature=""
+    )
+    def Set(self, interface_name, property_name, value):
+        # Set a property value
+        if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
+            raise dbus.exceptions.DBusException(
+                f"Unknown interface: {interface_name}",
+                name="org.freedesktop.DBus.Error.UnknownInterface",
+            )
+
+        if property_name == "ActiveProfile":
+            self._set_active_profile(str(value))
+        else:
+            raise dbus.exceptions.DBusException(
+                f"Property {property_name} is not writable",
+                name="org.freedesktop.DBus.Error.PropertyReadOnly",
+            )
+
+    # --- Property helpers
+    def _get_property(self, property_name):
+        # Internal method to get property values
+        if property_name == "ActiveProfile":
+            return self._sync_active_profile_with_tlp()
+        elif property_name == "PerformanceInhibited":
+            return ""  # Deprecated
+        elif property_name == "PerformanceDegraded":
+            return self._performance_degraded
+        elif property_name == "Profiles":
+            return dbus.Array(self._profiles, signature="a{sv}")
+        elif property_name == "Actions":
+            return dbus.Array(self._actions, signature="s")
+        elif property_name == "ActiveProfileHolds":
+            return self._get_active_profile_holds()
+        elif property_name == "Version":
+            return self._version
+        else:
+            raise dbus.exceptions.DBusException(
+                f"Unknown property: {property_name}",
+                name="org.freedesktop.DBus.Error.UnknownProperty",
+            )
+
+    def _set_active_profile(self, profile):
+        # Set the active profile and emit PropertiesChanged signal
+        if profile not in AVAILABLE_PROFILES:
+            raise dbus.exceptions.DBusException(
+                f"Invalid profile: {profile}",
+                name="org.freedesktop.DBus.Error.InvalidArgs",
+            )
+
+        # Get active TLP profile
+        # in case it has been changed in the meantime via tlp <profile>
+        _ = self._sync_active_profile_with_tlp()
+
+        if self._active_profile != profile:
+            # Change required
+            old_profile = self._active_profile
+
+            # Release all holds and notify holders
+            self._release_all_holds()
+
+            # Run tlp
+            self._run_tlp_profile(profile)
+            new_profile = self._sync_active_profile_with_tlp()
+
+            if new_profile == profile:
+                logger.info(
+                    f"Active TLP profile changed: {old_profile} -> {new_profile}"
+                )
+            else:
+                logger.warning(
+                    f"TLP profile change failed: {old_profile} -> {new_profile}"
+                )
+        else:
+            new_profile = self._active_profile
+            logger.info(f"TLP profile unchanged: {new_profile}")
+
+        # On change/no change: Emit PropertiesChanged signal
+        ### Q: how to emit on both interfaces?
+        self.PropertiesChanged(
+            INTERFACE_NAME, {"ActiveProfile": self._active_profile}, []
+        )
+
+    def _update_profile_from_holds(self):
+        # Update active profile based on current holds
+        if not self._holds:
+            # No holds, could revert to a default profile
+            # For now, keep current profile
+            return
+
+        # TODO: AVAILABLE_PROFILES?
+        # power-saver takes precedence over performance
+        has_power_saver = any(
+            h["profile"] == "power-saver" for h in self._holds.values()
+        )
+        has_performance = any(
+            h["profile"] == "performance" for h in self._holds.values()
+        )
+
+        new_profile = None
+        if has_power_saver:
+            new_profile = "power-saver"
+        elif has_performance:
+            new_profile = "performance"
+
+        # TODO: sync
+        if new_profile and new_profile != self._active_profile:
+            old_profile = self._active_profile
+            self._active_profile = new_profile
+
+            logger.info(
+                f"Active profile changed by hold: {old_profile} -> {new_profile}"
+            )
+
+            # Emit PropertiesChanged signal
+            self.PropertiesChanged(INTERFACE_NAME, {"ActiveProfile": new_profile}, [])
+            ### Q: how to emit on both interfaces?
+
+    def _release_all_holds(self):
+        # Release all holds when user manually changes profile
+        cookies_to_release = list(self._holds.keys())
+        for cookie in cookies_to_release:
+            hold_info = self._holds.pop(cookie)
+            logger.info(
+                f"Auto-releasing hold: {hold_info['application_id']} (cookie: {cookie})"
+            )
+
+            # Emit ProfileReleased signal to the sender
+            ### TODO: This is simplified; proper implementation would send to specific sender
+            ### Q: how to emit on both interfaces?
+            self.ProfileReleased(dbus.UInt32(cookie))
+
+    def _get_active_profile_holds(self):
+        # Get list of active profile holds
+        holds = []
+        for cookie, hold_info in self._holds.items():
+            holds.append(
+                {
+                    "ApplicationId": hold_info["application_id"],
+                    "Profile": hold_info["profile"],
+                    "Reason": hold_info["reason"],
+                }
+            )
+        return dbus.Array(holds, signature="a{sv}")
+
+    # --- TLP helpers
+    def _run_tlp_profile(self, profile):
+        # Call tlp to apply the profile
+        return subprocess.run(["tlp", f"{profile}"])
+
+    def _sync_active_profile_with_tlp(self):
+        # Read TLP statefile and translate into the last profile applied
+        with open(TLP_LAST_PROFILE, "r") as f:
+            last_pwr = f.readline().strip()
+
+        if last_pwr not in TLP_PROFILE_IDX:
+            logger.warning(f"Unknown TLP profile: {last_pwr}")
+            return "unknown"
+
+        self._active_profile = AVAILABLE_PROFILES[int(last_pwr)]
+        logger.debug(f"Active TLP profile: {last_pwr}")
+        return self._active_profile
+
+
+def main():
+    # --- MAIN entry point
+
+    # Initialize D-Bus main loop
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
+    # Connect to system bus
+    bus = dbus.SystemBus()
+
+    # Request bus name
+    name = dbus.service.BusName(BUS_NAME, bus)
+    # Request legacy bus name
+    name_legacy = dbus.service.BusName(BUS_NAME_LEGACY, bus)
+
+    # Create daemon instance
+    daemon = ProfilesDaemon(bus)
+
+    logger.info(f"{DAEMON_NAME} started on {BUS_NAME} and {BUS_NAME_LEGACY}")
+    logger.info(f"Object path: {OBJECT_PATH}")
+
+    # Run main loop
+    try:
+        mainloop = GLib.MainLoop()
+        mainloop.run()
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,5 @@
 [Unit]
-Description=TLP power-profiles-daemon API service
+Description=TLP profiles daemon API service
 After=multi-user.target display-manager.target
 Documentation=https://linrunner.de/tlp
 
