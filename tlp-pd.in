@@ -11,11 +11,8 @@ import dbus.service
 import dbus.mainloop.glib
 from gi.repository import GLib
 import subprocess
-import logging
+import syslog
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # --- Constants
 DAEMON_NAME = "TLP Profiles Daemon"
@@ -53,8 +50,6 @@ class ProfilesDaemon(dbus.service.Object):
         self._cookie_counter = 0
         self._holds = {}  # cookie -> {profile, reason, application_id, sender}
 
-        logger.info(f"{DAEMON_NAME} initialized")
-
     # --- Methods
     # Exported on both interfaces org.freedesktop.UPower.PowerProfiles and net.hadess.PowerProfiles (legacy)
 
@@ -90,8 +85,9 @@ class ProfilesDaemon(dbus.service.Object):
             "sender": sender,
         }
 
-        logger.info(
-            f"Profile hold created: {application_id} holds {profile} (cookie: {cookie})"
+        syslog.syslog(
+            syslog.LOG_INFO,
+            f"Profile hold created: {application_id} holds {profile} (cookie: {cookie})",
         )
 
         # Update active profile based on holds
@@ -116,8 +112,9 @@ class ProfilesDaemon(dbus.service.Object):
             )
 
         hold_info = self._holds.pop(cookie)
-        logger.info(
-            f"Profile hold released: {hold_info['application_id']} (cookie: {cookie})"
+        syslog.syslog(
+            syslog.LOG_INFO,
+            f"Profile hold released: {hold_info['application_id']} (cookie: {cookie})",
         )
 
         # Update active profile based on remaining holds
@@ -129,6 +126,10 @@ class ProfilesDaemon(dbus.service.Object):
     # Exported on the interface org.freedesktop.UPower.PowerProfiles
     # Emitted when a profile hold is released due to manual profile change
     def ProfileReleased(self, cookie):
+        syslog.syslog(
+            syslog.LOG_DEBUG,
+            f"Signal ProfileReleased",
+        )
         pass
 
     @dbus.service.signal(dbus_interface=dbus.PROPERTIES_IFACE, signature="sa{sv}as")
@@ -137,6 +138,10 @@ class ProfilesDaemon(dbus.service.Object):
     def PropertiesChanged(
         self, interface_name, changed_properties, invalidated_properties
     ):
+        syslog.syslog(
+            syslog.LOG_DEBUG,
+            f"Signal PropertiesChanged: interface={interface_name}, changed_properties={changed_properties}, invalidated_properties={invalidated_properties}",
+        )
         pass
 
     # --- Property-related Methods
@@ -147,6 +152,11 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def Get(self, interface_name, property_name):
         # Get a property value
+        syslog.syslog(
+            syslog.LOG_DEBUG,
+            "Method Get: interface={interface_name}, property={property_name}",
+        )
+
         if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
             raise dbus.exceptions.DBusException(
                 f"Unknown interface: {interface_name}",
@@ -160,6 +170,8 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def GetAll(self, interface_name):
         # Get all properties
+        syslog.syslog(syslog.LOG_DEBUG, f"Method GetAll: interface={interface_name}")
+
         if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
             raise dbus.exceptions.DBusException(
                 f"Unknown interface: {interface_name}",
@@ -181,6 +193,11 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def Set(self, interface_name, property_name, value):
         # Set a property value
+        syslog.syslog(
+            syslog.LOG_DEBUG,
+            f"Method Set: interface={interface_name}, property={property_name}, value={value}",
+        )
+
         if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
             raise dbus.exceptions.DBusException(
                 f"Unknown interface: {interface_name}",
@@ -242,16 +259,18 @@ class ProfilesDaemon(dbus.service.Object):
             new_profile = self._sync_active_profile_with_tlp()
 
             if new_profile == profile:
-                logger.info(
-                    f"Active TLP profile changed: {old_profile} -> {new_profile}"
+                syslog.syslog(
+                    syslog.LOG_INFO,
+                    f"Active TLP profile changed: {old_profile} -> {new_profile}",
                 )
             else:
-                logger.warning(
-                    f"TLP profile change failed: {old_profile} -> {new_profile}"
+                syslog.syslog(
+                    syslog.LOG_WARNING,
+                    f"TLP profile change failed: {old_profile} -> {new_profile}",
                 )
         else:
             new_profile = self._active_profile
-            logger.info(f"TLP profile unchanged: {new_profile}")
+            syslog.syslog(syslog.LOG_INFO, "TLP profile unchanged: {new_profile}")
 
         # On change/no change: Emit PropertiesChanged signal
         ### Q: how to emit on both interfaces?
@@ -286,8 +305,9 @@ class ProfilesDaemon(dbus.service.Object):
             old_profile = self._active_profile
             self._active_profile = new_profile
 
-            logger.info(
-                f"Active profile changed by hold: {old_profile} -> {new_profile}"
+            syslog.syslog(
+                syslog.LOG_INFO,
+                f"Active profile changed by hold: {old_profile} -> {new_profile}",
             )
 
             # Emit PropertiesChanged signal
@@ -299,8 +319,9 @@ class ProfilesDaemon(dbus.service.Object):
         cookies_to_release = list(self._holds.keys())
         for cookie in cookies_to_release:
             hold_info = self._holds.pop(cookie)
-            logger.info(
-                f"Auto-releasing hold: {hold_info['application_id']} (cookie: {cookie})"
+            syslog.syslog(
+                syslog.LOG_INFO,
+                f"Auto-releasing hold: {hold_info['application_id']} (cookie: {cookie})",
             )
 
             # Emit ProfileReleased signal to the sender
@@ -332,11 +353,11 @@ class ProfilesDaemon(dbus.service.Object):
             last_pwr = f.readline().strip()
 
         if last_pwr not in TLP_PROFILE_IDX:
-            logger.warning(f"Unknown TLP profile: {last_pwr}")
+            syslog.syslog(syslog.LOG_WARNING, f"Unknown TLP profile: {last_pwr}")
             return "unknown"
 
         self._active_profile = AVAILABLE_PROFILES[int(last_pwr)]
-        logger.debug(f"Active TLP profile: {last_pwr}")
+        syslog.syslog(syslog.LOG_DEBUG, f"Current TLP profile: {last_pwr}")
         return self._active_profile
 
 
@@ -356,16 +377,17 @@ def main():
 
     # Create daemon instance
     daemon = ProfilesDaemon(bus)
-
-    logger.info(f"{DAEMON_NAME} started on {BUS_NAME} and {BUS_NAME_LEGACY}")
-    logger.info(f"Object path: {OBJECT_PATH}")
+    syslog.syslog(
+        syslog.LOG_INFO,
+        f"{DAEMON_NAME} started on {BUS_NAME} and {BUS_NAME_LEGACY}, Object path: {OBJECT_PATH}",
+    )
 
     # Run main loop
     try:
         mainloop = GLib.MainLoop()
         mainloop.run()
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        syslog.sysloginfo(f"{DAEMON_NAME} shutting down ...")
 
 
 if __name__ == "__main__":
