@@ -274,19 +274,14 @@ class ProfilesDaemon(dbus.service.Object):
         elif has_performance:
             new_profile = "performance"
 
-        # TODO: sync
         if new_profile and new_profile != self._active_profile:
             old_profile = self._active_profile
-            self._active_profile = new_profile
+            _apply_profile_with_tlp(new_profile)
 
             syslog.syslog(
                 syslog.LOG_INFO,
                 f"Active profile changed by hold: {old_profile} -> {new_profile}",
             )
-
-            # Emit PropertiesChanged signal
-            self.PropertiesChanged(INTERFACE_NAME, {"ActiveProfile": new_profile}, [])
-            ### Q: how to emit on both interfaces?
 
     def _release_all_holds(self):
         # Release all holds when user manually changes profile
