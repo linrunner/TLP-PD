@@ -196,7 +196,7 @@ class ProfilesDaemon(dbus.service.Object):
             )
 
         return {
-            "ActiveProfile": self._sync_active_profile_with_tlp(),
+            "ActiveProfile": self._active_profile,
             "PerformanceInhibited": "",  # Deprecated
             "PerformanceDegraded": self._performance_degraded,
             "Profiles": dbus.Array(self._profiles, signature="a{sv}"),
