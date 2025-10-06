@@ -332,12 +332,15 @@ class ProfilesDaemon(dbus.service.Object):
         # Release all holds and notify holders
         self._release_all_holds()
 
-        # Call tlp to apply the profile
-        if args.debug:
-            syslog.syslog(syslog.LOG_DEBUG, f"TLP called to change profile: {profile}")
-        rc = subprocess.run(["tlp", f"{profile}"])
-        if args.debug:
-            syslog.syslog(syslog.LOG_DEBUG, f"TLP rc: {rc}")
+        # Run tlp <profile> in detached mode to avoid deadlocks in the event loop
+        # caused by tlp invoking SyncProfile
+        syslog.syslog(syslog.LOG_INFO, f"Run TLP detached to apply profile: {profile}")
+        _ = subprocess.Popen(
+            ["tlp", f"{profile}"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
 
     def _get_tlp_profile(self):
         # Read TLP statefile and translate into the last profile applied
