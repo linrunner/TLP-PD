@@ -137,7 +137,7 @@ class ProfilesDaemon(dbus.service.Object):
         # Update active profile
         self._active_profile = profile
 
-        # Tell the desktop about the new profile using the signal
+        # Notify the desktop about the new profile using the signal
         self.PropertiesChanged(INTERFACE_NAME, {"ActiveProfile": profile}, [])
 
     @dbus.service.signal(dbus_interface=INTERFACE_NAME, signature="u")
