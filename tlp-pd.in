@@ -147,10 +147,7 @@ class ProfilesDaemon(dbus.service.Object):
     # Emitted when a profile hold is released due to manual profile change
     def ProfileReleased(self, cookie):
         if args.debug:
-            syslog.syslog(
-                syslog.LOG_DEBUG,
-                f"Signal ProfileReleased",
-            )
+            syslog.syslog(syslog.LOG_DEBUG, f"Signal ProfileReleased")
         pass
 
     @dbus.service.signal(dbus_interface=dbus.PROPERTIES_IFACE, signature="sa{sv}as")
@@ -376,6 +373,7 @@ def main():
     syslog.syslog(syslog.LOG_INFO, f"Interfaces: {BUS_NAME}, {BUS_NAME_LEGACY}")
     syslog.syslog(syslog.LOG_INFO, f"Object path: {OBJECT_PATH}")
     syslog.syslog(syslog.LOG_INFO, f"Arguments: {vars(args)}")
+    syslog.syslog(syslog.LOG_INFO, f"Start profile: {daemon._active_profile}")
 
     # Run main loop
     try:
