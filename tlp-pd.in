@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # TLP Profiles Daemon (TLP-PD)
-# Implements the org.freedesktop.UPower.PowerProfile D-BUS interface
-# invented by power-profiles-daemon
+# Implements the org.freedesktop.UPower.PowerProfile D-BUS interface with TLP as backend
 #
 # Copyright (c) 2025 Thomas Koch <linrunner at gmx.net> and others.
 # SPDX-License-Identifier: GPL-2.0-or-later
@@ -40,7 +39,7 @@ class ProfilesDaemon(dbus.service.Object):
         dbus.service.Object.add_to_connection(self, bus, OBJECT_PATH_LEGACY)
 
         # Internal state
-        self._active_profile = "balanced"
+        self._active_profile = self._get_tlp_profile()
         self._profiles = []
         for profile in AVAILABLE_PROFILES:
             self._profiles.append({"Profile": f"{profile}", "Driver": "tlp"})
@@ -50,8 +49,7 @@ class ProfilesDaemon(dbus.service.Object):
         self._cookie_counter = 0
         self._holds = {}  # cookie -> {profile, reason, application_id, sender}
 
-    # --- Methods
-    # Exported on both interfaces org.freedesktop.UPower.PowerProfiles and net.hadess.PowerProfiles (legacy)
+    # --- Interfaces org.freedesktop.UPower.PowerProfiles and net.hadess.PowerProfiles (legacy)
 
     @dbus.service.method(
         dbus_interface=INTERFACE_NAME,
@@ -120,7 +118,27 @@ class ProfilesDaemon(dbus.service.Object):
         # Update active profile based on remaining holds
         self._update_profile_from_holds()
 
-    # --- Signals
+    @dbus.service.method(
+        dbus_interface=INTERFACE_NAME, in_signature="s", out_signature=""
+    )
+    @dbus.service.method(
+        dbus_interface=INTERFACE_NAME_LEGACY, in_signature="s", out_signature=""
+    )
+    def SyncProfile(self, profile):
+        # Callback for tlp after profile changes: update internal state only
+        if profile not in AVAILABLE_PROFILES:
+            raise dbus.exceptions.DBusException(
+                f"Invalid profile: {profile}",
+                name="org.freedesktop.DBus.Error.InvalidArgs",
+            )
+
+        syslog.syslog(syslog.LOG_DEBUG, f"SyncProfile: {profile}")
+
+        # Update active profile
+        self._active_profile = profile
+
+        # Tell the desktop about the new profile using the signal
+        self.PropertiesChanged(INTERFACE_NAME, {"ActiveProfile": profile}, [])
 
     @dbus.service.signal(dbus_interface=INTERFACE_NAME, signature="u")
     # Exported on the interface org.freedesktop.UPower.PowerProfiles
@@ -144,8 +162,7 @@ class ProfilesDaemon(dbus.service.Object):
         )
         pass
 
-    # --- Property-related Methods
-    # Exported on the interface org.freedesktop.DBus.Properties
+    # --- Interface org.freedesktop.DBus.Properties
 
     @dbus.service.method(
         dbus_interface=dbus.PROPERTIES_IFACE, in_signature="ss", out_signature="v"
@@ -205,18 +222,18 @@ class ProfilesDaemon(dbus.service.Object):
             )
 
         if property_name == "ActiveProfile":
-            self._set_active_profile(str(value))
+            self._apply_profile_with_tlp(str(value))
         else:
             raise dbus.exceptions.DBusException(
                 f"Property {property_name} is not writable",
                 name="org.freedesktop.DBus.Error.PropertyReadOnly",
             )
 
-    # --- Property helpers
+    # --- Helpers
     def _get_property(self, property_name):
         # Internal method to get property values
         if property_name == "ActiveProfile":
-            return self._sync_active_profile_with_tlp()
+            return self._active_profile
         elif property_name == "PerformanceInhibited":
             return ""  # Deprecated
         elif property_name == "PerformanceDegraded":
@@ -234,49 +251,6 @@ class ProfilesDaemon(dbus.service.Object):
                 f"Unknown property: {property_name}",
                 name="org.freedesktop.DBus.Error.UnknownProperty",
             )
-
-    def _set_active_profile(self, profile):
-        # Set the active profile and emit PropertiesChanged signal
-        if profile not in AVAILABLE_PROFILES:
-            raise dbus.exceptions.DBusException(
-                f"Invalid profile: {profile}",
-                name="org.freedesktop.DBus.Error.InvalidArgs",
-            )
-
-        # Get active TLP profile
-        # in case it has been changed in the meantime via tlp <profile>
-        _ = self._sync_active_profile_with_tlp()
-
-        if self._active_profile != profile:
-            # Change required
-            old_profile = self._active_profile
-
-            # Release all holds and notify holders
-            self._release_all_holds()
-
-            # Run tlp
-            self._run_tlp_profile(profile)
-            new_profile = self._sync_active_profile_with_tlp()
-
-            if new_profile == profile:
-                syslog.syslog(
-                    syslog.LOG_INFO,
-                    f"Active TLP profile changed: {old_profile} -> {new_profile}",
-                )
-            else:
-                syslog.syslog(
-                    syslog.LOG_WARNING,
-                    f"TLP profile change failed: {old_profile} -> {new_profile}",
-                )
-        else:
-            new_profile = self._active_profile
-            syslog.syslog(syslog.LOG_INFO, "TLP profile unchanged: {new_profile}")
-
-        # On change/no change: Emit PropertiesChanged signal
-        ### Q: how to emit on both interfaces?
-        self.PropertiesChanged(
-            INTERFACE_NAME, {"ActiveProfile": self._active_profile}, []
-        )
 
     def _update_profile_from_holds(self):
         # Update active profile based on current holds
@@ -343,22 +317,37 @@ class ProfilesDaemon(dbus.service.Object):
         return dbus.Array(holds, signature="a{sv}")
 
     # --- TLP helpers
-    def _run_tlp_profile(self, profile):
-        # Call tlp to apply the profile
-        return subprocess.run(["tlp", f"{profile}"])
+    def _apply_profile_with_tlp(self, profile):
+        # Call tlp to apply the new profile
+        if profile not in AVAILABLE_PROFILES:
+            raise dbus.exceptions.DBusException(
+                f"Invalid profile: {profile}",
+                name="org.freedesktop.DBus.Error.InvalidArgs",
+            )
 
-    def _sync_active_profile_with_tlp(self):
+        # Release all holds and notify holders
+        self._release_all_holds()
+
+        # Call tlp to apply the profile
+        syslog.syslog(
+            syslog.LOG_DEBUG,
+            f"Call TLP change profile to: {profile}",
+        )
+        _ = subprocess.run(["tlp", f"{profile}"])
+
+    def _get_tlp_profile(self):
         # Read TLP statefile and translate into the last profile applied
         with open(TLP_LAST_PROFILE, "r") as f:
             last_pwr = f.readline().strip()
 
         if last_pwr not in TLP_PROFILE_IDX:
             syslog.syslog(syslog.LOG_WARNING, f"Unknown TLP profile: {last_pwr}")
-            return "unknown"
+            return "balanced"
 
-        self._active_profile = AVAILABLE_PROFILES[int(last_pwr)]
-        syslog.syslog(syslog.LOG_DEBUG, f"Current TLP profile: {last_pwr}")
-        return self._active_profile
+        tlp_profile = AVAILABLE_PROFILES[int(last_pwr)]
+        syslog.syslog(syslog.LOG_DEBUG, f"Current TLP profile: {tlp_profile}")
+
+        return tlp_profile
 
 
 def main():
