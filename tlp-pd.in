@@ -10,6 +10,7 @@ import dbus.service
 import dbus.mainloop.glib
 from gi.repository import GLib
 import subprocess
+import argparse
 import syslog
 
 
@@ -132,7 +133,8 @@ class ProfilesDaemon(dbus.service.Object):
                 name="org.freedesktop.DBus.Error.InvalidArgs",
             )
 
-        syslog.syslog(syslog.LOG_DEBUG, f"SyncProfile: {profile}")
+        if args.debug:
+            syslog.syslog(syslog.LOG_DEBUG, f"SyncProfile: {profile}")
 
         # Update active profile
         self._active_profile = profile
@@ -144,10 +146,11 @@ class ProfilesDaemon(dbus.service.Object):
     # Exported on the interface org.freedesktop.UPower.PowerProfiles
     # Emitted when a profile hold is released due to manual profile change
     def ProfileReleased(self, cookie):
-        syslog.syslog(
-            syslog.LOG_DEBUG,
-            f"Signal ProfileReleased",
-        )
+        if args.debug:
+            syslog.syslog(
+                syslog.LOG_DEBUG,
+                f"Signal ProfileReleased",
+            )
         pass
 
     @dbus.service.signal(dbus_interface=dbus.PROPERTIES_IFACE, signature="sa{sv}as")
@@ -156,10 +159,11 @@ class ProfilesDaemon(dbus.service.Object):
     def PropertiesChanged(
         self, interface_name, changed_properties, invalidated_properties
     ):
-        syslog.syslog(
-            syslog.LOG_DEBUG,
-            f"Signal PropertiesChanged: interface={interface_name}, changed_properties={changed_properties}, invalidated_properties={invalidated_properties}",
-        )
+        if args.debug:
+            syslog.syslog(
+                syslog.LOG_DEBUG,
+                f"Signal PropertiesChanged: interface={interface_name}, changed_properties={changed_properties}, invalidated_properties={invalidated_properties}",
+            )
         pass
 
     # --- Interface org.freedesktop.DBus.Properties
@@ -169,10 +173,11 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def Get(self, interface_name, property_name):
         # Get a property value
-        syslog.syslog(
-            syslog.LOG_DEBUG,
-            "Method Get: interface={interface_name}, property={property_name}",
-        )
+        if args.debug:
+            syslog.syslog(
+                syslog.LOG_DEBUG,
+                "Method Get: interface={interface_name}, property={property_name}",
+            )
 
         if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
             raise dbus.exceptions.DBusException(
@@ -187,7 +192,10 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def GetAll(self, interface_name):
         # Get all properties
-        syslog.syslog(syslog.LOG_DEBUG, f"Method GetAll: interface={interface_name}")
+        if args.debug:
+            syslog.syslog(
+                syslog.LOG_DEBUG, f"Method GetAll: interface={interface_name}"
+            )
 
         if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
             raise dbus.exceptions.DBusException(
@@ -210,10 +218,11 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def Set(self, interface_name, property_name, value):
         # Set a property value
-        syslog.syslog(
-            syslog.LOG_DEBUG,
-            f"Method Set: interface={interface_name}, property={property_name}, value={value}",
-        )
+        if args.debug:
+            syslog.syslog(
+                syslog.LOG_DEBUG,
+                f"Method Set: interface={interface_name}, property={property_name}, value={value}",
+            )
 
         if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
             raise dbus.exceptions.DBusException(
@@ -324,11 +333,11 @@ class ProfilesDaemon(dbus.service.Object):
         self._release_all_holds()
 
         # Call tlp to apply the profile
-        syslog.syslog(
-            syslog.LOG_DEBUG,
-            f"Call TLP change profile to: {profile}",
-        )
-        _ = subprocess.run(["tlp", f"{profile}"])
+        if args.debug:
+            syslog.syslog(syslog.LOG_DEBUG, f"TLP called to change profile: {profile}")
+        rc = subprocess.run(["tlp", f"{profile}"])
+        if args.debug:
+            syslog.syslog(syslog.LOG_DEBUG, f"TLP rc: {rc}")
 
     def _get_tlp_profile(self):
         # Read TLP statefile and translate into the last profile applied
@@ -340,14 +349,13 @@ class ProfilesDaemon(dbus.service.Object):
             return "balanced"
 
         tlp_profile = AVAILABLE_PROFILES[int(last_pwr)]
-        syslog.syslog(syslog.LOG_DEBUG, f"Current TLP profile: {tlp_profile}")
+        if args.debug:
+            syslog.syslog(syslog.LOG_DEBUG, f"Current TLP profile: {tlp_profile}")
 
         return tlp_profile
 
 
 def main():
-    # --- MAIN entry point
-
     # Initialize D-Bus main loop
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
@@ -361,18 +369,25 @@ def main():
 
     # Create daemon instance
     daemon = ProfilesDaemon(bus)
-    syslog.syslog(
-        syslog.LOG_INFO,
-        f"{DAEMON_NAME} started on {BUS_NAME} and {BUS_NAME_LEGACY}, Object path: {OBJECT_PATH}",
-    )
+    syslog.syslog(syslog.LOG_INFO, f"{DAEMON_NAME} started.")
+    syslog.syslog(syslog.LOG_INFO, f"Interfaces: {BUS_NAME}, {BUS_NAME_LEGACY}")
+    syslog.syslog(syslog.LOG_INFO, f"Object path: {OBJECT_PATH}")
+    syslog.syslog(syslog.LOG_INFO, f"Arguments: {vars(args)}")
 
     # Run main loop
     try:
         mainloop = GLib.MainLoop()
         mainloop.run()
     except KeyboardInterrupt:
-        syslog.sysloginfo(f"{DAEMON_NAME} shutting down ...")
+        syslog.syslog(syslog.LOG_INFO, f"{DAEMON_NAME} shutting down ...")
 
 
 if __name__ == "__main__":
+    # Parse arguments
+    parser = argparse.ArgumentParser(description=f"{DAEMON_NAME}")
+    _ = parser.add_argument(
+        "--debug", "-D", action="store_true", help="log debugging messages"
+    )
+    args = parser.parse_args()
+
     main()
