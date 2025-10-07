@@ -5,6 +5,7 @@
 # Copyright (c) 2025 Thomas Koch <linrunner at gmx.net> and others.
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+from syslog import LOG_DAEMON
 import dbus
 import dbus.service
 import dbus.mainloop.glib
@@ -13,6 +14,7 @@ import subprocess
 import argparse
 import logging
 import logging.handlers
+import os
 
 # --- Constants
 DAEMON_NAME = "TLP Profiles Daemon"
@@ -338,16 +340,16 @@ class ProfilesDaemon(dbus.service.Object):
 
 
 if __name__ == "__main__":
-    # Parse arguments
+    # --- Parse arguments
     parser = argparse.ArgumentParser(description=f"{DAEMON_NAME}")
     _ = parser.add_argument(
         "--debug", "-D", action="store_true", help="log debugging messages"
     )
     args = parser.parse_args()
 
-    # Set up logging
+    # --- Set up logging
     logger = logging.getLogger(__name__)
-    handler = logging.handlers.SysLogHandler(address="/dev/log")
+    handler = logging.handlers.SysLogHandler(address="/dev/log", facility=LOG_DAEMON)
     logger.addHandler(handler)
 
     # Set syslog identifier "tlp-pd"
@@ -360,7 +362,7 @@ if __name__ == "__main__":
     else:
         logger.setLevel(logging.INFO)
 
-    # Initialize D-Bus main loop
+    # --- Initialize D-Bus
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
     # Connect to system bus
@@ -372,7 +374,7 @@ if __name__ == "__main__":
     bus_name = dbus.service.BusName(BUS_NAME, bus)
     bus_name_legacy = dbus.service.BusName(BUS_NAME_LEGACY, bus)
 
-    # Create daemon instance
+    # --- Create daemon instance
     daemon = ProfilesDaemon(bus)
     logger.info(f"{DAEMON_NAME} started.")
     logger.info(f"Interfaces: {BUS_NAME}, {BUS_NAME_LEGACY}")
@@ -380,7 +382,7 @@ if __name__ == "__main__":
     logger.info(f"Arguments: {vars(args)}")
     logger.info(f"Start profile: {daemon.Get(INTERFACE_NAME, 'ActiveProfile')}")
 
-    # Run main loop
+    # --- Run main loop
     try:
         mainloop = GLib.MainLoop()
         mainloop.run()
