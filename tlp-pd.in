@@ -33,6 +33,64 @@ OBJECT_PATH_LEGACY = "/net/hadess/PowerProfiles"
 TLP_LAST_PROFILE = "@TLP_RUN@/last_pwr"
 TLP_PROFILE_IDX = ["0", "1", "2"]
 
+# --- Introspection
+INTROSPECTION_XML = """
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.freedesktop.DBus.Properties">
+    <method name="Get">
+      <arg type="s" name="interface_name" direction="in"/>
+      <arg type="s" name="property_name" direction="in"/>
+      <arg type="v" name="value" direction="out"/>
+    </method>
+    <method name="GetAll">
+      <arg type="s" name="interface_name" direction="in"/>
+      <arg type="a{sv}" name="properties" direction="out"/>
+    </method>
+    <method name="Set">
+      <arg type="s" name="interface_name" direction="in"/>
+      <arg type="s" name="property_name" direction="in"/>
+      <arg type="v" name="value" direction="in"/>
+    </method>
+    <signal name="PropertiesChanged">
+      <arg type="s" name="interface_name"/>
+      <arg type="a{sv}" name="changed_properties"/>
+      <arg type="as" name="invalidated_properties"/>
+    </signal>
+  </interface>
+  <interface name="org.freedesktop.DBus.Introspectable">
+    <method name="Introspect">
+      <arg type="s" name="xml_data" direction="out"/>
+    </method>
+  </interface>
+  <interface name="@PD_INTERFACE@">
+    <method name="HoldProfile">
+      <arg type="s" name="profile" direction="in"/>
+      <arg type="s" name="reason" direction="in"/>
+      <arg type="s" name="application_id" direction="in"/>
+      <arg type="u" name="cookie" direction="out"/>
+    </method>
+    <method name="ReleaseProfile">
+      <arg type="u" name="cookie" direction="in"/>
+    </method>
+    <method name="SyncProfile">
+      <arg type="s" name="profile" direction="in"/>
+    </method>
+    <signal name="ProfileReleased">
+      <arg type="u" name="cookie"/>
+    </signal>
+    <property type="s" name="ActiveProfile" access="readwrite"/>
+    <property type="s" name="PerformanceInhibited" access="read"/>
+    <property type="s" name="PerformanceDegraded" access="read"/>
+    <property type="aa{sv}" name="Profiles" access="read"/>
+    <property type="as" name="Actions" access="read"/>
+    <property type="aa{sv}" name="ActiveProfileHolds" access="read"/>
+    <property type="s" name="Version" access="read"/>
+    <property type="b" name="BatteryAware" access="readwrite"/>
+  </interface>
+"""
+
 
 # --- D-Bus service implementing the power-profiles-daemon API
 class ProfilesDaemon(dbus.service.Object):
@@ -221,6 +279,32 @@ class ProfilesDaemon(dbus.service.Object):
             raise dbus.exceptions.DBusException(
                 f"Property {property_name} is not writable",
                 name="org.freedesktop.DBus.Error.PropertyReadOnly",
+            )
+
+    # --- Interface org.freedesktop.DBus.Introspectable
+
+    @dbus.service.method(
+        dbus_interface=dbus.INTROSPECTABLE_IFACE,
+        in_signature="",
+        out_signature="s",
+        path_keyword="object_path",
+        connection_keyword="connection",
+    )
+    def Introspect(self, object_path, connection):
+        # Return introspection XML describing this service
+        logger.debug(
+            f"Method Introspect: object_path={object_path}, connection={connection}"
+        )
+
+        # Answer depending on the object path
+        if object_path == OBJECT_PATH:
+            return INTROSPECTION_XML.replace("@PD_INTERFACE@", INTERFACE_NAME)
+        elif object_path == OBJECT_PATH_LEGACY:
+            return INTROSPECTION_XML.replace("@PD_INTERFACE@", INTERFACE_NAME_LEGACY)
+        else:
+            raise dbus.exceptions.DBusException(
+                f"(No such object path '{object_path}'",
+                name="org.freedesktop.DBus.Error.UnknownObject",
             )
 
     # --- Helpers
