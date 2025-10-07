@@ -316,7 +316,7 @@ class ProfilesDaemon(dbus.service.Object):
 
         # Run tlp <profile> in detached mode to avoid deadlocks in the event loop
         # caused by tlp invoking SyncProfile
-        logger.info(f"Run TLP detached to apply profile: {profile}")
+        logger.info(f"Run detached TLP to apply profile: {profile}")
         _ = subprocess.Popen(
             ["tlp", f"{profile}"],
             start_new_session=True,
