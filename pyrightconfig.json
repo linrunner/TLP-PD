@@ -1,0 +1,10 @@
+{
+    "include": [],
+
+    "defineConstant": {
+        "DEBUG": true
+    },
+
+    "typeCheckingMode": "standard",
+    "reportAttributeAccessIssue": "none"
+}
