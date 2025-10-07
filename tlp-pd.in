@@ -283,6 +283,8 @@ class ProfilesDaemon(dbus.service.Object):
 
         if property_name == "ActiveProfile":
             self._apply_profile_with_tlp(str(value))
+        elif property_name == "BatteryAware":
+            self._set_property(property_name, str(value))
         else:
             raise dbus.exceptions.DBusException(
                 f"Property {property_name} is not writable",
@@ -341,6 +343,23 @@ class ProfilesDaemon(dbus.service.Object):
                 f"Unknown property: {property_name}",
                 name="org.freedesktop.DBus.Error.UnknownProperty",
             )
+
+    def _set_property(self, property_name, value):
+        # Internal method to set property values
+        if property_name == "BatteryAware":
+            if value == "true":
+                self._battery_aware = True
+            else:
+                self._battery_aware = False
+        else:
+            raise dbus.exceptions.DBusException(
+                f"Property not writable: {property_name}",
+                name="org.freedesktop.DBus.Error.PropertyNotWritable",
+            )
+            return
+
+        # Notify the desktop about the changed property
+        self.PropertiesChanged(INTERFACE_NAME, {f"{property_name}": value}, [])
 
     def _update_profile_from_holds(self):
         # Update active profile based on current holds
