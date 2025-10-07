@@ -147,7 +147,7 @@ class ProfilesDaemon(dbus.service.Object):
     # Emitted when a profile hold is released due to manual profile change
     def ProfileReleased(self, cookie):
         if args.debug:
-            syslog.syslog(syslog.LOG_DEBUG, f"Signal ProfileReleased")
+            syslog.syslog(syslog.LOG_DEBUG, "Signal ProfileReleased")
         pass
 
     @dbus.service.signal(dbus_interface=dbus.PROPERTIES_IFACE, signature="sa{sv}as")
@@ -282,7 +282,7 @@ class ProfilesDaemon(dbus.service.Object):
 
         if new_profile and new_profile != self._active_profile:
             old_profile = self._active_profile
-            _apply_profile_with_tlp(new_profile)
+            self._apply_profile_with_tlp(new_profile)
 
             syslog.syslog(
                 syslog.LOG_INFO,
@@ -362,10 +362,11 @@ def main():
     # Connect to system bus
     bus = dbus.SystemBus()
 
-    # Request bus name
-    name = dbus.service.BusName(BUS_NAME, bus)
-    # Request legacy bus name
-    name_legacy = dbus.service.BusName(BUS_NAME_LEGACY, bus)
+    # Claim well-known names on the bus
+    # Note: the name is released when the BusName object becomes unreferenced
+    #   -> ignore "never used" lint warning
+    bus_name = dbus.service.BusName(BUS_NAME, bus)
+    bus_name_legacy = dbus.service.BusName(BUS_NAME_LEGACY, bus)
 
     # Create daemon instance
     daemon = ProfilesDaemon(bus)
@@ -373,7 +374,9 @@ def main():
     syslog.syslog(syslog.LOG_INFO, f"Interfaces: {BUS_NAME}, {BUS_NAME_LEGACY}")
     syslog.syslog(syslog.LOG_INFO, f"Object path: {OBJECT_PATH}")
     syslog.syslog(syslog.LOG_INFO, f"Arguments: {vars(args)}")
-    syslog.syslog(syslog.LOG_INFO, f"Start profile: {daemon._active_profile}")
+    syslog.syslog(
+        syslog.LOG_INFO, f"Start profile: {daemon.Get(INTERFACE_NAME, 'ActiveProfile')}"
+    )
 
     # Run main loop
     try:
