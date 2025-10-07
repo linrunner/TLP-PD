@@ -349,6 +349,12 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     handler = logging.handlers.SysLogHandler(address="/dev/log")
     logger.addHandler(handler)
+
+    # Set syslog identifier "tlp-pd"
+    formatter = logging.Formatter(f"{os.path.basename(__file__)}: %(message)s")
+    handler.setFormatter(formatter)
+
+    # Set syslog level
     if args.debug:
         logger.setLevel(logging.DEBUG)
     else:
