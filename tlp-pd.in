@@ -250,18 +250,21 @@ class ProfilesDaemon(dbus.service.Object):
                 f"Unknown interface: {interface_name}",
                 name="org.freedesktop.DBus.Error.UnknownInterface",
             )
+        all_props = {}
+        for prop in [
+            "ActiveProfile",
+            "PerformanceInhibited",
+            "PerformanceDegraded",
+            "Profiles",
+            "Actions",
+            "ActionsInfo",
+            "ActiveProfileHolds",
+            "Version",
+            "BatteryAware",
+        ]:
+            all_props.update({f"{prop}": self._get_property(prop)})
 
-        return {
-            "ActiveProfile": self._active_profile,
-            "PerformanceInhibited": "",  # Deprecated
-            "PerformanceDegraded": self._performance_degraded,
-            "Profiles": dbus.Array(self._profiles, signature="a{sv}"),
-            "Actions": dbus.Array(self._actions, signature="s"),
-            "ActionsInfo": dbus.Array(self._actions_info, signature="aa{sv}"),
-            "ActiveProfileHolds": self._get_active_profile_holds(),
-            "Version": self._version,
-            "BatteryAware": self._battery_aware,
-        }
+        return all_props
 
     @dbus.service.method(
         dbus_interface=dbus.PROPERTIES_IFACE, in_signature="ssv", out_signature=""
