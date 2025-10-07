@@ -15,6 +15,7 @@ import argparse
 import logging
 import logging.handlers
 import os
+import sys
 
 # --- Constants
 DAEMON_NAME = "TLP Profiles Daemon"
@@ -346,6 +347,14 @@ if __name__ == "__main__":
         "--debug", "-D", action="store_true", help="log debugging messages"
     )
     args = parser.parse_args()
+
+    # Check root privileges
+    if os.geteuid() != 0:
+        print(
+            f"ERROR: root privileges are required to run the {DAEMON_NAME}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # --- Set up logging
     logger = logging.getLogger(__name__)
