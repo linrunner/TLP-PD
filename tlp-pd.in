@@ -281,15 +281,7 @@ class ProfilesDaemon(dbus.service.Object):
                 name="org.freedesktop.DBus.Error.UnknownInterface",
             )
 
-        if property_name == "ActiveProfile":
-            self._apply_profile_with_tlp(str(value))
-        elif property_name == "BatteryAware":
-            self._set_property(property_name, str(value))
-        else:
-            raise dbus.exceptions.DBusException(
-                f"Property {property_name} is not writable",
-                name="org.freedesktop.DBus.Error.PropertyReadOnly",
-            )
+        self._set_property(property_name, value)
 
     # --- Interface org.freedesktop.DBus.Introspectable
 
@@ -346,20 +338,23 @@ class ProfilesDaemon(dbus.service.Object):
 
     def _set_property(self, property_name, value):
         # Internal method to set property values
-        if property_name == "BatteryAware":
+        if property_name == "ActiveProfile":
+            self._apply_profile_with_tlp(str(value))
+        elif property_name == "BatteryAware":
             if value == "true":
                 self._battery_aware = True
             else:
                 self._battery_aware = False
         else:
             raise dbus.exceptions.DBusException(
-                f"Property not writable: {property_name}",
-                name="org.freedesktop.DBus.Error.PropertyNotWritable",
+                f"Property {property_name} is readonly",
+                name="org.freedesktop.DBus.Error.PropertyReadOnly",
             )
             return
 
         # Notify the desktop about the changed property
-        self.PropertiesChanged(INTERFACE_NAME, {f"{property_name}": value}, [])
+        if property_name != "ActiveProfile":
+            self.PropertiesChanged(INTERFACE_NAME, {f"{property_name}": value}, [])
 
     def _update_profile_from_holds(self):
         # Update active profile based on current holds
