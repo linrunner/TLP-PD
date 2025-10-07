@@ -85,6 +85,7 @@ INTROSPECTION_XML = """
     <property type="s" name="PerformanceDegraded" access="read"/>
     <property type="aa{sv}" name="Profiles" access="read"/>
     <property type="as" name="Actions" access="read"/>
+    <property type="aa{sv}" name="ActionsInfo" access="read"/>
     <property type="aa{sv}" name="ActiveProfileHolds" access="read"/>
     <property type="s" name="Version" access="read"/>
     <property type="b" name="BatteryAware" access="readwrite"/>
@@ -107,7 +108,9 @@ class ProfilesDaemon(dbus.service.Object):
             self._profiles.append({"Profile": f"{profile}", "Driver": "tlp"})
         self._performance_degraded = ""
         self._actions = []
+        self._actions_info = []
         self._version = "@TLPVER@"
+        self._battery_aware = False
         self._cookie_counter = 0
         self._holds = {}  # cookie -> {profile, reason, application_id, sender}
 
@@ -254,8 +257,10 @@ class ProfilesDaemon(dbus.service.Object):
             "PerformanceDegraded": self._performance_degraded,
             "Profiles": dbus.Array(self._profiles, signature="a{sv}"),
             "Actions": dbus.Array(self._actions, signature="s"),
+            "ActionsInfo": dbus.Array(self._actions_info, signature="aa{sv}"),
             "ActiveProfileHolds": self._get_active_profile_holds(),
             "Version": self._version,
+            "BatteryAware": self._battery_aware,
         }
 
     @dbus.service.method(
@@ -320,10 +325,14 @@ class ProfilesDaemon(dbus.service.Object):
             return dbus.Array(self._profiles, signature="a{sv}")
         elif property_name == "Actions":
             return dbus.Array(self._actions, signature="s")
+        elif property_name == "ActionsInfo":
+            return (dbus.Array(self._actions_info, signature="aa{sv}"),)
         elif property_name == "ActiveProfileHolds":
             return self._get_active_profile_holds()
         elif property_name == "Version":
             return self._version
+        elif property_name == "BatteryAware":
+            return self._battery_aware
         else:
             raise dbus.exceptions.DBusException(
                 f"Unknown property: {property_name}",
