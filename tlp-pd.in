@@ -104,7 +104,10 @@ class ProfilesDaemon(dbus.service.Object):
         self._bus = bus
 
         # Internal state
-        self._active_profile = self._get_tlp_profile()
+        self._active_profile = self._get_tlp_profile()  # Last profile applied by TLP
+        self._selected_profile = (
+            self._active_profile
+        )  # Last profile received by Set(ActiveProfile)
         self._profiles = [
             {"Profile": f"{profile}", "CpuDriver": "tlp", "PlatformDriver": "tlp"}
             for profile in AVAILABLE_PROFILES
@@ -132,13 +135,20 @@ class ProfilesDaemon(dbus.service.Object):
         sender_keyword="sender",
     )
     def HoldProfile(self, profile, reason, application_id, sender=None):
-        # Hold a profile until released
-        ### Q: do we need this resp. which client is actually using it?
-        ### TODO: extend to AVAILABLE_PROFILES?
-        if profile not in ["power-saver", "performance"]:
+        # Hold a new profile until:
+        # - either it is released by ReleaseProfile()
+        # - or another one is selected by the user via Set(ActiveProfile)
+        if profile not in AVAILABLE_PROFILES:
             raise dbus.exceptions.DBusException(
                 f"Invalid profile: {profile}",
                 name="org.freedesktop.DBus.Error.InvalidArgs",
+            )
+
+        # Check authorization first
+        if not self._check_polkit_auth(sender, f"{BUS_NAME}.hold-profile"):
+            raise dbus.exceptions.DBusException(
+                "Not authorized to hold power profile",
+                name="org.freedesktop.PolicyKit1.Error.NotAuthorized",
             )
 
         self._cookie_counter += 1
@@ -152,7 +162,7 @@ class ProfilesDaemon(dbus.service.Object):
         }
 
         logger.info(
-            f"Profile hold created: {application_id} holds {profile} (cookie: {cookie})"
+            f"Profile hold created: {application_id} holds {profile} (cookie: {cookie}, reason: {reason})"
         )
 
         # Update active profile based on holds
@@ -167,8 +177,9 @@ class ProfilesDaemon(dbus.service.Object):
         dbus_interface=INTERFACE_NAME_LEGACY, in_signature="u", out_signature=""
     )
     def ReleaseProfile(self, cookie):
-        # Release a profile hold
-        ### Q: do we need this resp. which client is actually using it?
+        # Release a profile hold and revert to:
+        # - either the previous held profile
+        # - or the last profile selected by the user
         cookie = int(cookie)
         if cookie not in self._holds:
             raise dbus.exceptions.DBusException(
@@ -176,9 +187,9 @@ class ProfilesDaemon(dbus.service.Object):
                 name="org.freedesktop.DBus.Error.InvalidArgs",
             )
 
-        hold_info = self._holds.pop(cookie)
+        hold_rel = self._holds.pop(cookie)
         logger.info(
-            f"Profile hold released: {hold_info['application_id']} (cookie: {cookie})"
+            f"Profile hold {hold_rel['profile']} released: {hold_rel['application_id']} (cookie: {cookie})"
         )
 
         # Update active profile based on remaining holds
@@ -352,7 +363,10 @@ class ProfilesDaemon(dbus.service.Object):
                     name="org.freedesktop.PolicyKit1.Error.NotAuthorized",
                 )
 
+            # User (manually) changes profile
+            self._drop_all_holds()
             self._apply_profile_with_tlp(str(value))
+            self._selected_profile = str(value)
 
         elif property_name == "BatteryAware":
             if value == "true":
@@ -371,42 +385,36 @@ class ProfilesDaemon(dbus.service.Object):
             self.PropertiesChanged(INTERFACE_NAME, {f"{property_name}": value}, [])
 
     def _update_profile_from_holds(self):
-        # Update active profile based on current holds
-        if not self._holds:
-            # No holds, could revert to a default profile
-            # For now, keep current profile
-            return
-
-        # TODO: AVAILABLE_PROFILES?
-        # power-saver takes precedence over performance
-        has_power_saver = any(
-            h["profile"] == "power-saver" for h in self._holds.values()
-        )
-        has_performance = any(
-            h["profile"] == "performance" for h in self._holds.values()
-        )
-
-        new_profile = None
-        if has_power_saver:
-            new_profile = "power-saver"
-        elif has_performance:
-            new_profile = "performance"
-
-        if new_profile and new_profile != self._active_profile:
-            old_profile = self._active_profile
-            self._apply_profile_with_tlp(new_profile)
-
+        # Change active profile to the last hold in the list
+        # If the hold list is empty, revert to the last user selected profile
+        if len(self._holds) == 0:
             logger.info(
-                f"Active profile changed by hold: {old_profile} -> {new_profile}"
+                f"Changing active profile from hold {self._active_profile} to last user selection {self._selected_profile}"
             )
+            self._apply_profile_with_tlp(self._selected_profile)
+        else:
+            # Apply profile from the list's end
+            last_cookie_key = list(self._holds)[-1]
+            new_profile = self._holds[last_cookie_key]["profile"]
+            new_appid = self._holds[last_cookie_key]["application_id"]
+            old_profile = self._active_profile
+            if new_profile != old_profile:
+                logger.info(
+                    f"Changing active profile from hold {old_profile} to {new_profile}: {new_appid} (cookie: {last_cookie_key})"
+                )
+                self._apply_profile_with_tlp(new_profile)
+            else:
+                logger.info(
+                    f"Keeping active profile at hold {new_profile}: {new_appid} (cookie: {last_cookie_key})"
+                )
 
-    def _release_all_holds(self):
-        # Release all holds when user manually changes profile
-        cookies_to_release = list(self._holds.keys())
-        for cookie in cookies_to_release:
-            hold_info = self._holds.pop(cookie)
+    def _drop_all_holds(self):
+        # Release all holds and notify holders
+        cookies2release = list(self._holds.keys())
+        for cookie in cookies2release:
+            hold2release = self._holds.pop(cookie)
             logger.info(
-                f"Auto-releasing hold: {hold_info['application_id']} (cookie: {cookie})"
+                f"Auto-releasing hold {hold2release['profile']}: {hold2release['application_id']} (cookie: {cookie})"
             )
 
             # Emit ProfileReleased signal to the sender
@@ -416,16 +424,16 @@ class ProfilesDaemon(dbus.service.Object):
 
     def _get_active_profile_holds(self):
         # Get list of active profile holds
-        holds = []
+        active_holds = []
         for cookie, hold_info in self._holds.items():
-            holds.append(
+            active_holds.append(
                 {
                     "ApplicationId": hold_info["application_id"],
                     "Profile": hold_info["profile"],
                     "Reason": hold_info["reason"],
                 }
             )
-        return dbus.Array(holds, signature="a{sv}")
+        return dbus.Array(active_holds, signature="a{sv}")
 
     # --- TLP helpers
     def _apply_profile_with_tlp(self, profile):
@@ -435,9 +443,6 @@ class ProfilesDaemon(dbus.service.Object):
                 f"Invalid profile: {profile}",
                 name="org.freedesktop.DBus.Error.InvalidArgs",
             )
-
-        # Release all holds and notify holders
-        self._release_all_holds()
 
         # Run tlp <profile> in detached mode to avoid deadlocks in the event loop
         # caused by tlp invoking SyncProfile
