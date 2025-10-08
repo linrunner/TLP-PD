@@ -103,9 +103,10 @@ class ProfilesDaemon(dbus.service.Object):
 
         # Internal state
         self._active_profile = self._get_tlp_profile()
-        self._profiles = []
-        for profile in AVAILABLE_PROFILES:
-            self._profiles.append({"Profile": f"{profile}", "Driver": "tlp"})
+        self._profiles = [
+            {"Profile": f"{profile}", "CpuDriver": "tlp", "PlatformDriver": "tlp"}
+            for profile in AVAILABLE_PROFILES
+        ]
         self._performance_degraded = ""
         self._actions = []
         self._actions_info = []
@@ -250,21 +251,21 @@ class ProfilesDaemon(dbus.service.Object):
                 f"Unknown interface: {interface_name}",
                 name="org.freedesktop.DBus.Error.UnknownInterface",
             )
-        all_props = {}
-        for prop in [
-            "ActiveProfile",
-            "PerformanceInhibited",
-            "PerformanceDegraded",
-            "Profiles",
-            "Actions",
-            "ActionsInfo",
-            "ActiveProfileHolds",
-            "Version",
-            "BatteryAware",
-        ]:
-            all_props.update({f"{prop}": self._get_property(prop)})
 
-        return all_props
+        return {
+            f"{prop}": self._get_property(prop)
+            for prop in [
+                "ActiveProfile",
+                "PerformanceInhibited",
+                "PerformanceDegraded",
+                "Profiles",
+                "Actions",
+                "ActionsInfo",
+                "ActiveProfileHolds",
+                "Version",
+                "BatteryAware",
+            ]
+        }
 
     @dbus.service.method(
         dbus_interface=dbus.PROPERTIES_IFACE, in_signature="ssv", out_signature=""
