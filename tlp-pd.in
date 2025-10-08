@@ -268,9 +268,12 @@ class ProfilesDaemon(dbus.service.Object):
         }
 
     @dbus.service.method(
-        dbus_interface=dbus.PROPERTIES_IFACE, in_signature="ssv", out_signature=""
+        dbus_interface=dbus.PROPERTIES_IFACE,
+        in_signature="ssv",
+        out_signature="",
+        sender_keyword="sender",
     )
-    def Set(self, interface_name, property_name, value):
+    def Set(self, interface_name, property_name, value, sender=None):
         # Set a property value
         logger.debug(
             f"Method Set: interface={interface_name}, property={property_name}, value={value}"
@@ -282,7 +285,7 @@ class ProfilesDaemon(dbus.service.Object):
                 name="org.freedesktop.DBus.Error.UnknownInterface",
             )
 
-        self._set_property(property_name, value)
+        self._set_property(property_name, value, sender)
 
     # --- Interface org.freedesktop.DBus.Introspectable
 
@@ -337,10 +340,18 @@ class ProfilesDaemon(dbus.service.Object):
                 name="org.freedesktop.DBus.Error.UnknownProperty",
             )
 
-    def _set_property(self, property_name, value):
+    def _set_property(self, property_name, value, sender):
         # Internal method to set property values
         if property_name == "ActiveProfile":
+            # Check authorization first
+            if not self._check_polkit_auth(sender, f"{BUS_NAME}.switch-profile"):
+                raise dbus.exceptions.DBusException(
+                    "Not authorized to switch power profile",
+                    name="org.freedesktop.PolicyKit1.Error.NotAuthorized",
+                )
+
             self._apply_profile_with_tlp(str(value))
+
         elif property_name == "BatteryAware":
             if value == "true":
                 self._battery_aware = True
@@ -449,6 +460,58 @@ class ProfilesDaemon(dbus.service.Object):
         logger.debug(f"Current TLP profile: {tlp_profile}")
 
         return tlp_profile
+
+    # --- PolicyKit helpers
+    def _check_polkit_auth(self, sender, action_id):
+        # Check if the D-Bus sender is authorized for the given PolicyKit action.
+        # Args:
+        # - sender: D-Bus sender string (e.g., ":1.234")
+        # - action_id: PolicyKit action identifier (e.g., "org.freedesktop.UPower.PowerProfiles.switch-profile")
+        # Returns: bool: True if authorized, False otherwise
+
+        # Get PolicyKit authority interface
+        bus = dbus.SystemBus()
+        polkit = bus.get_object(
+            "org.freedesktop.PolicyKit1", "/org/freedesktop/PolicyKit1/Authority"
+        )
+        authority = dbus.Interface(
+            polkit, dbus_interface="org.freedesktop.PolicyKit1.Authority"
+        )
+
+        # Get the process ID and start time for the sender
+        dbus_obj = bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+        dbus_iface = dbus.Interface(dbus_obj, dbus_interface="org.freedesktop.DBus")
+        pid = dbus_iface.GetConnectionUnixProcessID(sender)
+
+        # Build the subject for PolicyKit check
+        # Subject type: unix-process with PID and start-time
+        subject = (
+            "unix-process",
+            {
+                "pid": dbus.UInt32(pid),
+                "start-time": dbus.UInt64(0),  # 0 means "don't check start time"
+            },
+        )
+
+        # Check authorization
+        try:
+            result = authority.CheckAuthorization(
+                subject,
+                action_id,
+                {},  # details
+                dbus.UInt32(
+                    0x1
+                ),  # flags: AllowUserInteraction (show auth dialog if needed)
+                "",  # cancellation_id
+            )
+            # result is a tuple: (is_authorized, is_challenge, details)
+
+            is_authorized = result[0]
+            return bool(is_authorized)
+
+        except dbus.exceptions.DBusException as e:
+            logger.error(f"PolicyKit authorization check failed: {e}")
+            return False
 
 
 if __name__ == "__main__":
