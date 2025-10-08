@@ -100,6 +100,8 @@ class ProfilesDaemon(dbus.service.Object):
         # Export on the legacy interface net.hadess.PowerProfiles and legacy path too
         self.SUPPORTS_MULTIPLE_OBJECT_PATHS = True
         dbus.service.Object.add_to_connection(self, bus, OBJECT_PATH_LEGACY)
+        # Remember bus for _check_polkit_auth()
+        self._bus = bus
 
         # Internal state
         self._active_profile = self._get_tlp_profile()
@@ -470,8 +472,7 @@ class ProfilesDaemon(dbus.service.Object):
         # Returns: bool: True if authorized, False otherwise
 
         # Get PolicyKit authority interface
-        bus = dbus.SystemBus()
-        polkit = bus.get_object(
+        polkit = self._bus.get_object(
             "org.freedesktop.PolicyKit1", "/org/freedesktop/PolicyKit1/Authority"
         )
         authority = dbus.Interface(
@@ -479,7 +480,7 @@ class ProfilesDaemon(dbus.service.Object):
         )
 
         # Get the process ID and start time for the sender
-        dbus_obj = bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+        dbus_obj = self._bus.get_object("org.freedesktop.DBus", "/org/freedesktop/DBus")
         dbus_iface = dbus.Interface(dbus_obj, dbus_interface="org.freedesktop.DBus")
         pid = dbus_iface.GetConnectionUnixProcessID(sender)
 
