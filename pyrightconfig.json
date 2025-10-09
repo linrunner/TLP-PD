@@ -8,5 +8,8 @@
     },
 
     "typeCheckingMode": "standard",
-    "reportAttributeAccessIssue": "none"
+    "reportAttributeAccessIssue": "none",
+    "reportUnusedImport": true,
+    "reportUnusedClass": true,
+    "reportUnusedFunction": true
 }
