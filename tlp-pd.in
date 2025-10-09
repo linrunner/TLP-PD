@@ -161,6 +161,7 @@ class ProfilesDaemon(dbus.service.Object):
         self._cookie_counter += 1
         cookie = self._cookie_counter
 
+        # Store hold
         self._holds[cookie] = {
             "profile": profile,
             "reason": reason,
@@ -413,15 +414,15 @@ class ProfilesDaemon(dbus.service.Object):
             self.PropertiesChanged(INTERFACE_NAME, {f"{property_name}": value}, [])
 
     def _update_profile_from_holds(self):
-        # Change active profile to the last hold in the list
-        # If the hold list is empty, revert to the last user selected profile
+        # Change active profile to the last hold (highest cookie)
+        # If there are no holds remaining, revert to the last user selected profile
         if len(self._holds) == 0:
             logger.info(
                 f"Changing active profile from hold {self._active_profile} to last user selection {self._selected_profile}"
             )
             self._apply_profile_with_tlp(self._selected_profile)
         else:
-            # Apply profile from the list's end
+            # Apply profile from the last hold i.e the dict's "tail"
             last_cookie_key = list(self._holds)[-1]
             new_profile = self._holds[last_cookie_key]["profile"]
             new_appid = self._holds[last_cookie_key]["application_id"]
@@ -607,7 +608,7 @@ if __name__ == "__main__":
 
     # Claim well-known names on the bus
     # Note: the name is released when the BusName object becomes unreferenced
-    #   -> ignore "never used" lint warning
+    #   -> ignore "never used" linter warning
     bus_name = dbus.service.BusName(BUS_NAME, bus)
     bus_name_legacy = dbus.service.BusName(BUS_NAME_LEGACY, bus)
 
