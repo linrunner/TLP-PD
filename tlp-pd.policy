@@ -5,6 +5,11 @@
   <vendor>tlp-pd</vendor>
   <vendor_url>https://github.com/linrunner/TLP/</vendor_url>
 
+  <!--
+    Only users with an active session are allowed to perform actions. This means
+    that the user is currently logged in, the session is unlocked and in use.
+  -->
+
   <action id="org.freedesktop.UPower.PowerProfiles.switch-profile">
     <description>Switch Power Profile</description>
     <message>Privileges are required to switch power profiles.</message>
