@@ -14,6 +14,7 @@ import argparse
 import logging
 import logging.handlers
 import os
+import string
 import subprocess
 import sys
 from syslog import LOG_DAEMON
@@ -139,6 +140,11 @@ class ProfilesDaemon(dbus.service.Object):
         # Hold a new profile until:
         # - either it is released by ReleaseProfile()
         # - or another one is selected by the user via Set(ActiveProfile)
+        profile = _sanitize_input(profile)
+        reason = _sanitize_input(reason)
+        application_id = _sanitize_input(application_id)
+        sender = _sanitize_input(sender)
+
         if profile not in AVAILABLE_PROFILES:
             raise dbus.exceptions.DBusException(
                 f"Invalid profile: {profile}",
@@ -204,6 +210,8 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def SyncProfile(self, profile):
         # Callback for tlp after profile changes: update internal state only
+        profile = _sanitize_input(profile)
+
         if profile not in AVAILABLE_PROFILES:
             raise dbus.exceptions.DBusException(
                 f"Invalid profile: {profile}",
@@ -231,6 +239,10 @@ class ProfilesDaemon(dbus.service.Object):
     def PropertiesChanged(
         self, interface_name, changed_properties, invalidated_properties
     ):
+        interface_name = _sanitize_input(interface_name)
+        changed_properties = _sanitize_input(changed_properties)
+        invalidated_properties = _sanitize_input(invalidated_properties)
+
         logger.debug(
             f"Signal PropertiesChanged: interface={interface_name}, changed_properties={changed_properties}, invalidated_properties={invalidated_properties}"
         )
@@ -243,7 +255,12 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def Get(self, interface_name, property_name):
         # Get a property value
-        logger.debug("Method Get: interface={interface_name}, property={property_name}")
+        interface_name = _sanitize_input(interface_name)
+        property_name = _sanitize_input(property_name)
+
+        logger.debug(
+            f"Method Get: interface={interface_name}, property={property_name}"
+        )
 
         if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
             raise dbus.exceptions.DBusException(
@@ -258,6 +275,8 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def GetAll(self, interface_name):
         # Get all properties
+        interface_name = _sanitize_input(interface_name)
+
         logger.debug(f"Method GetAll: interface={interface_name}")
 
         if interface_name not in [INTERFACE_NAME, INTERFACE_NAME_LEGACY]:
@@ -289,6 +308,11 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def Set(self, interface_name, property_name, value, sender=None):
         # Set a property value
+        interface_name = _sanitize_input(interface_name)
+        property_name = _sanitize_input(property_name)
+        value = _sanitize_input(value)
+        sender = _sanitize_input(sender)
+
         logger.debug(
             f"Method Set: interface={interface_name}, property={property_name}, value={value}"
         )
@@ -312,6 +336,9 @@ class ProfilesDaemon(dbus.service.Object):
     )
     def Introspect(self, object_path, connection):
         # Return introspection XML describing this service
+        object_path = _sanitize_input(object_path)
+        connection = _sanitize_input(connection)
+
         logger.debug(
             f"Method Introspect: object_path={object_path}, connection={connection}"
         )
@@ -476,6 +503,8 @@ class ProfilesDaemon(dbus.service.Object):
         # - sender: D-Bus sender string (e.g., ":1.234")
         # - action_id: PolicyKit action identifier (e.g., "org.freedesktop.UPower.PowerProfiles.switch-profile")
         # Returns: bool: True if authorized, False otherwise
+        sender = _sanitize_input(sender)
+        action_id = _sanitize_input(action_id)
 
         # Get PolicyKit authority interface
         polkit = self._bus.get_object(
@@ -521,6 +550,24 @@ class ProfilesDaemon(dbus.service.Object):
             return False
 
 
+# --- Input sanitation
+INPUT_ALLOWED_CHARS = (
+    string.ascii_letters + string.digits + " !@'+-.,/:;_$&*()%<=>?#[]{|}^~" + '"'
+)
+
+
+def _sanitize_input(input_str, sani_ch="?"):
+    # Replaces any character not in NAMES_ALLOWED_CHARS with sani_char
+    result_str = ""
+    for ch in input_str:
+        if ch in INPUT_ALLOWED_CHARS:
+            result_str += ch
+        else:
+            result_str += sani_ch
+    return result_str
+
+
+# --- MAIN
 if __name__ == "__main__":
     # --- Parse arguments
     parser = argparse.ArgumentParser(description=f"{DAEMON_NAME}")
