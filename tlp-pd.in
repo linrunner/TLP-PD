@@ -5,17 +5,18 @@
 # Copyright (c) 2025 Thomas Koch <linrunner at gmx.net> and others.
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-from syslog import LOG_DAEMON
 import dbus
 import dbus.service
 import dbus.mainloop.glib
 from gi.repository import GLib
-import subprocess
+
 import argparse
 import logging
 import logging.handlers
 import os
+import subprocess
 import sys
+from syslog import LOG_DAEMON
 
 # --- Constants
 DAEMON_NAME = "TLP Profiles Daemon"
