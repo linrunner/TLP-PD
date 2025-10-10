@@ -358,16 +358,14 @@ class ProfilesDaemon(dbus.service.Object):
 
         # Get 'dbus' introspection XML in a string
         intro_xml = super().Introspect(object_path, connection)
-        if object_path == OBJECT_PATH:
-            intro_xml.replace("@PD_INTERFACE@", INTERFACE_NAME)
-        elif object_path == OBJECT_PATH_LEGACY:
-            intro_xml.replace("@PD_INTERFACE@", INTERFACE_NAME_LEGACY)
-        else:
+        if object_path == OBJECT_PATH_LEGACY:
+            # Inject legacy interface
+            intro_xml = intro_xml.replace(INTERFACE_NAME, INTERFACE_NAME_LEGACY)
+        elif object_path != OBJECT_PATH:
             raise dbus.exceptions.DBusException(
                 f"(No such object path '{object_path}'",
                 name="org.freedesktop.DBus.Error.UnknownObject",
             )
-
         # Convert to list/array and insert properties
         xml_linewise = intro_xml.splitlines()
         # Do
