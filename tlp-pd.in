@@ -246,21 +246,6 @@ class ProfilesDaemon(dbus.service.Object):
         logger.debug("Signal ProfileReleased")
         pass
 
-    @dbus.service.signal(dbus_interface=dbus.PROPERTIES_IFACE, signature="sa{sv}as")
-    # Exported on the interface org.freedesktop.DBus.Properties
-    # Emitted when the active profile changes
-    def PropertiesChanged(
-        self, interface_name, changed_properties, invalidated_properties
-    ):
-        interface_name = _sanitize_input(interface_name)
-        changed_properties = _sanitize_input(changed_properties)
-        invalidated_properties = _sanitize_input(invalidated_properties)
-
-        logger.debug(
-            f"Signal PropertiesChanged: interface={interface_name}, changed_properties={changed_properties}, invalidated_properties={invalidated_properties}"
-        )
-        pass
-
     # --- Interface org.freedesktop.DBus.Properties
 
     @dbus.service.method(
@@ -337,6 +322,21 @@ class ProfilesDaemon(dbus.service.Object):
             )
 
         self._set_property(property_name, value, sender)
+
+    @dbus.service.signal(dbus_interface=dbus.PROPERTIES_IFACE, signature="sa{sv}as")
+    # Exported on the interface org.freedesktop.DBus.Properties
+    # Emitted when the active profile changes
+    def PropertiesChanged(
+        self, interface_name, changed_properties, invalidated_properties
+    ):
+        interface_name = _sanitize_input(interface_name)
+        changed_properties = _sanitize_input(changed_properties)
+        invalidated_properties = _sanitize_input(invalidated_properties)
+
+        logger.debug(
+            f"Signal PropertiesChanged: interface={interface_name}, changed_properties={changed_properties}, invalidated_properties={invalidated_properties}"
+        )
+        pass
 
     # --- Interface org.freedesktop.DBus.Introspectable
 
