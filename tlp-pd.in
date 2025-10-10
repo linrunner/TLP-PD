@@ -368,7 +368,7 @@ class ProfilesDaemon(dbus.service.Object):
             )
         # Convert to list/array and insert properties
         xml_linewise = intro_xml.splitlines()
-        # Do
+        # Return as string
         xml_linewise[-2:0] = INTROSPECTION_PROPERTIES_XML.splitlines()
 
         # Return as a string
