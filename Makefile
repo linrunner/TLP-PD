@@ -92,6 +92,9 @@ INFILES = \
 	tlp-pd \
 	tlp-pd.service
 
+MANFILESPD8 = \
+	tlp-pd.service.8
+
 # Make targets
 all: $(INFILES)
 
@@ -111,7 +114,14 @@ install-pd: all
 		install -D -m 644 tlp-pd.dbus.service $(_DBSVC)/$(BUS_NAME).service; \
 		sed -e 's|@BUS_NAME@|$(BUS_NAME)|g' -i $(_DBSVC)/$(BUS_NAME).service;)
 
+install-man-pd:
+	# manpages
+	install -d -m 755 $(_MAN)/man8
+	cd man-pd && install -m 644 $(MANFILESPD8) $(_MAN)/man8/
+
 install: install-pd
+
+install-man: install-man-pd
 
 uninstall-pd:
 	rm -f $(_LIB)/tlp-pd
@@ -121,4 +131,10 @@ uninstall-pd:
 	rm -f $(_DBCONF)/net.hadess.PowerProfiles.conf
 	rm -f $(_DBSVC)/net.hadess.PowerProfiles.service
 
+uninstall-man-rdw:
+	# manpages
+	cd $(_MAN)/man8 && rm -f $(MANFILESPD8)
+
 uninstall: uninstall-pd
+
+uninstall-man: uninstall-man-pd
