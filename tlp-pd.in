@@ -248,7 +248,63 @@ class ProfilesDaemon(dbus.service.Object):
         logger.debug("Signal ProfileReleased")
         pass
 
+    # --- Interface org.freedesktop.DBus.Peer
+    # Note: for reasons still unknown, the parent class methods are called directly.
+    # Therefore, the declarations for this interface only provide introspection.
+
+    @dbus.service.method(
+        dbus_interface=dbus.PEER_IFACE, in_signature="", out_signature=""
+    )
+    def Ping(self):
+        # Call parent implementation
+        return super().Ping()
+
+    @dbus.service.method(
+        dbus_interface=dbus.PEER_IFACE, in_signature="", out_signature="s"
+    )
+    def GetMachineId(self):
+        # Call parent implementation
+        return super().GetMachineId()
+
+    # --- Interface org.freedesktop.DBus.Introspectable
+
+    @dbus.service.method(
+        dbus_interface=dbus.INTROSPECTABLE_IFACE,
+        in_signature="",
+        out_signature="s",
+        path_keyword="object_path",
+        connection_keyword="connection",
+    )
+    def Introspect(self, object_path, connection):
+        # Return introspection XML describing this service
+        object_path = _sanitize_input(object_path)
+        # Note: connection is not a string, do *not* sanitize
+
+        logger.debug(
+            f"Method Introspect: object_path={object_path}, connection={connection}"
+        )
+
+        # Get 'dbus' introspection XML in a string
+        intro_xml = super().Introspect(object_path, connection)
+        if object_path == OBJECT_PATH_LEGACY:
+            # Inject legacy interface
+            intro_xml = intro_xml.replace(INTERFACE_NAME, INTERFACE_NAME_LEGACY)
+        elif object_path != OBJECT_PATH:
+            raise dbus.exceptions.DBusException(
+                f"(No such object path '{object_path}'",
+                name="org.freedesktop.DBus.Error.UnknownObject",
+            )
+        # Convert to list/array and insert properties
+        xml_linewise = intro_xml.splitlines()
+        # Return as string
+        xml_linewise[-2:0] = INTROSPECTION_PROPERTIES_XML.splitlines()
+
+        # Return as a string
+        return "\n".join(xml_linewise)
+
     # --- Interface org.freedesktop.DBus.Properties
+    # Note: this interface section must be the last one, or the primitive Introspect()
+    # property XML insertion will not work!
 
     @dbus.service.method(
         dbus_interface=dbus.PROPERTIES_IFACE, in_signature="ss", out_signature="v"
@@ -338,42 +394,6 @@ class ProfilesDaemon(dbus.service.Object):
             f"Signal PropertiesChanged: interface={interface_name}, changed_properties={changed_properties}, invalidated_properties={invalidated_properties}"
         )
         pass
-
-    # --- Interface org.freedesktop.DBus.Introspectable
-
-    @dbus.service.method(
-        dbus_interface=dbus.INTROSPECTABLE_IFACE,
-        in_signature="",
-        out_signature="s",
-        path_keyword="object_path",
-        connection_keyword="connection",
-    )
-    def Introspect(self, object_path, connection):
-        # Return introspection XML describing this service
-        object_path = _sanitize_input(object_path)
-        # Note: connection is not a string, do *not* sanitize
-
-        logger.debug(
-            f"Method Introspect: object_path={object_path}, connection={connection}"
-        )
-
-        # Get 'dbus' introspection XML in a string
-        intro_xml = super().Introspect(object_path, connection)
-        if object_path == OBJECT_PATH_LEGACY:
-            # Inject legacy interface
-            intro_xml = intro_xml.replace(INTERFACE_NAME, INTERFACE_NAME_LEGACY)
-        elif object_path != OBJECT_PATH:
-            raise dbus.exceptions.DBusException(
-                f"(No such object path '{object_path}'",
-                name="org.freedesktop.DBus.Error.UnknownObject",
-            )
-        # Convert to list/array and insert properties
-        xml_linewise = intro_xml.splitlines()
-        # Return as string
-        xml_linewise[-2:0] = INTROSPECTION_PROPERTIES_XML.splitlines()
-
-        # Return as a string
-        return "\n".join(xml_linewise)
 
     # --- Helpers
     def _get_property(self, property_name):
