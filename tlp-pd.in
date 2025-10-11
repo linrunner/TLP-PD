@@ -332,8 +332,7 @@ class ProfilesDaemon(dbus.service.Object):
         self, interface_name, changed_properties, invalidated_properties
     ):
         interface_name = _sanitize_input(interface_name)
-        changed_properties = _sanitize_input(changed_properties)
-        invalidated_properties = _sanitize_input(invalidated_properties)
+        # Note: changed_properties, invalidated_properties are not strings, do *not* sanitize
 
         logger.debug(
             f"Signal PropertiesChanged: interface={interface_name}, changed_properties={changed_properties}, invalidated_properties={invalidated_properties}"
