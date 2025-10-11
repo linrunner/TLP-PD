@@ -16,6 +16,7 @@ import argparse
 import logging
 import logging.handlers
 import os
+import signal
 import string
 import subprocess
 import sys
@@ -513,14 +514,22 @@ class ProfilesDaemon(dbus.service.Object):
                 name="org.freedesktop.DBus.Error.InvalidArgs",
             )
 
-        # Run tlp <profile> in detached mode to avoid deadlocks in the event loop
-        # caused by tlp invoking SyncProfile
+        # Run tlp <profile> in detached mode:
+        # * Don't worry about the exit code,
+        #   we'll get the result back later via SyncProfile()
+        # * Avoids deadlocks in the event loop caused by tlp invoking
+        #   SyncProfile()
+        # Note: start_new_session=True detaches the process from the parent’s
+        #   process group, but the parent is still responsible for reaping the
+        #   child. Therefore auto-reap must be used (see __main__)
         logger.info(f"Run detached TLP to apply profile: {profile}")
         _ = subprocess.Popen(
             ["tlp", f"{profile}"],
             start_new_session=True,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
         )
 
     def _get_tlp_profile(self):
@@ -610,7 +619,7 @@ def _sanitize_input(input_str, sani_ch="¿"):
 
 # --- MAIN
 if __name__ == "__main__":
-    # --- Parse arguments
+    # Parse arguments
     parser = argparse.ArgumentParser(description=f"{DAEMON_NAME}")
     _ = parser.add_argument(
         "--debug", "-D", action="store_true", help="log debugging messages"
@@ -624,6 +633,9 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # Automatically reap tlp zombie subprocesses
+    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 
     # --- Set up logging
     logger = logging.getLogger(__name__)
