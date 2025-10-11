@@ -577,7 +577,7 @@ INPUT_ALLOWED_CHARS = (
 )
 
 
-def _sanitize_input(input_str, sani_ch="?"):
+def _sanitize_input(input_str, sani_ch="¿"):
     # Replaces any character not in NAMES_ALLOWED_CHARS with sani_char
     result_str = ""
     for ch in input_str:
