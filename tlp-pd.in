@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # TLP Profiles Daemon (TLP-PD)
-# Implements the org.freedesktop.UPower.PowerProfile D-BUS interface with TLP as backend
+# Implements the D-Bus interface org.freedesktop.UPower.PowerProfile
+# which is displayed in desktop environments as a power profile switch.
+# TLP is used as the backend to apply these profiles.
 #
 # Copyright (c) 2025 Thomas Koch <linrunner at gmx.net> and others.
 # SPDX-License-Identifier: GPL-2.0-or-later
@@ -637,7 +639,7 @@ if __name__ == "__main__":
     logger.info(f"Interfaces: {BUS_NAME}, {BUS_NAME_LEGACY}")
     logger.info(f"Object path: {OBJECT_PATH}")
     logger.info(f"Arguments: {vars(args)}")
-    logger.info(f"Start profile: {daemon.Get(INTERFACE_NAME, 'ActiveProfile')}")
+    logger.info(f"Initial profile: {daemon.Get(INTERFACE_NAME, 'ActiveProfile')}")
 
     # --- Run main loop
     try:
